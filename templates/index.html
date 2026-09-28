@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Портфельный калькулятор РФ</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Портфельный калькулятор: Россия</h1>
+    <p class="sub">Оптимизация по Марковицу на реальных (очищенных от инфляции) доходностях · <span id="dataRange">загрузка…</span></p>
+  </div>
+  <button class="ghost" id="themeBtn" title="Светлая / тёмная тема">◐</button>
+</header>
+
+<div class="layout">
+  <!-- ================= ПАНЕЛЬ НАСТРОЕК ================= -->
+  <aside class="panel" id="controls">
+    <section>
+      <h2>1. Индикаторы</h2>
+      <div class="row small">
+        <button class="link" id="selAll">все</button> ·
+        <button class="link" id="selDefault">по умолчанию</button> ·
+        <button class="link" id="selNone">сбросить</button>
+      </div>
+      <div id="assetList" class="asset-list"></div>
+    </section>
+
+    <section>
+      <h2>2. Период</h2>
+      <div class="grid2">
+        <label>с <select id="start"></select></label>
+        <label>по <select id="end"></select></label>
+      </div>
+      <p class="hint">Берётся общий период, где есть данные по всем выбранным индикаторам.</p>
+    </section>
+
+    <section>
+      <h2>3. Очистка от инфляции</h2>
+      <label class="radio"><input type="radio" name="deflator" value="cpi" checked> по индексу потребительских цен (ИПЦ)</label>
+      <label class="radio"><input type="radio" name="deflator" value="m2"> по росту денежной массы М2</label>
+    </section>
+
+    <section>
+      <h2>4. Критерий оптимизации</h2>
+      <div id="criteria" class="criteria"></div>
+      <div id="targetBox" class="target hidden">
+        <label id="targetLabel">Целевое значение, % годовых</label>
+        <input type="number" id="target" step="0.5" value="5">
+        <p class="hint" id="targetHint"></p>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. Параметры</h2>
+      <label>Безрисковая ставка (реальная), % годовых
+        <input type="number" id="rf" step="0.25" value="5">
+      </label>
+      <p class="hint">Как в задании — 0,05 (5%). <button class="link" id="rfAvg"></button></p>
+      <label>Максимальная доля одного актива: <b id="maxWVal">40%</b>
+        <input type="range" id="maxW" min="10" max="100" step="5" value="40">
+      </label>
+      <p class="hint">Ограничивает концентрацию: 40% — диверсифицированный портфель, 100% — «чистый» Марковиц без ограничений.</p>
+      <label class="radio"><input type="checkbox" id="rebalance" checked> ежемесячная ребалансировка</label>
+    </section>
+
+    <div class="actions">
+      <button class="primary" id="runBtn">Рассчитать портфель</button>
+      <button id="runAllBtn">Сравнить все 4 критерия</button>
+    </div>
+  </aside>
+
+  <!-- ================= РЕЗУЛЬТАТЫ ================= -->
+  <main id="results">
+    <div id="msg" class="msg hidden"></div>
+
+    <section class="card">
+      <div class="card-head">
+        <h2 id="resTitle">Результат</h2>
+        <span class="muted" id="resPeriod"></span>
+      </div>
+      <div class="kpis" id="kpis"></div>
+    </section>
+
+    <div class="two">
+      <section class="card">
+        <div class="card-head"><h2>Эффективная граница</h2>
+          <span class="muted">риск (σ) → доходность (μ), реальные, % годовых</span></div>
+        <div id="frontierChart" class="chart"></div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Веса портфеля</h2>
+          <span class="muted">нажмите на сектор — подробности</span></div>
+        <div id="pieChart" class="chart"></div>
+        <div id="sliceInfo" class="slice-info muted">—</div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-head"><h2>Кривая доходности портфеля</h2>
+        <div class="row small">
+          <label class="radio"><input type="checkbox" id="logScale"> лог. шкала</label>
+          <label class="radio"><input type="checkbox" id="showBench" checked> ориентиры (М2, MCFTR, депозит)</label>
+        </div>
+      </div>
+      <p class="muted small">Сколько стал стоить 1 рубль, вложенный в начале периода, в ценах начала периода (т.е. после инфляции).</p>
+      <div id="curveChart" class="chart tall"></div>
+      <div id="ddChart" class="chart short"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Сравнение портфелей</h2>
+        <div class="row">
+          <input type="text" id="cmpName" placeholder="название портфеля">
+          <button id="addCmp">+ Добавить текущий в сравнение</button>
+          <button class="ghost" id="clearCmp">Очистить</button>
+        </div>
+      </div>
+      <p class="muted small">Все портфели из списка пересчитываются на одном и том же периоде и показываются на одном графике.</p>
+      <div id="cmpChart" class="chart tall"></div>
+      <div class="table-wrap"><table id="cmpTable" class="tbl"></table></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Ручные веса</h2>
+        <span class="muted">измените доли и нажмите «Пересчитать»</span></div>
+      <div id="manualWeights" class="manual"></div>
+      <div class="row"><button id="evalManual">Пересчитать с ручными весами</button>
+        <button class="ghost" id="equalW">Равные веса</button></div>
+    </section>
+
+    <div class="two">
+      <section class="card">
+        <div class="card-head"><h2>Показатели отдельных индикаторов</h2></div>
+        <div class="table-wrap"><table id="assetTable" class="tbl"></table></div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Корреляции месячных доходностей</h2></div>
+        <div id="corrChart" class="chart"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <details>
+        <summary><h2 class="inline">Методика расчёта</h2></summary>
+        <div class="method">
+          <p><b>Реальная доходность</b> за месяц: r<sub>реал</sub> = (1 + r<sub>ном</sub>) / (1 + π) − 1, где π — инфляция за месяц (ИПЦ, ЦБ РФ) или рост денежной массы М2.</p>
+          <p><b>Ожидаемая доходность</b> μ = среднемесячная реальная доходность × 12. <b>Волатильность</b> σ = стандартное отклонение месячных доходностей × √12.</p>
+          <p><b>Доходность и риск портфеля</b>: μ<sub>p</sub> = Σ w<sub>i</sub>μ<sub>i</sub>, σ<sub>p</sub> = √(wᵀ Σ w), где Σ — ковариационная матрица. Веса w ≥ 0, Σ w = 1 (без коротких продаж).</p>
+          <p><b>Критерии:</b> (1) min σ<sub>p</sub> — портфель минимальной волатильности Марковица; (2) max (μ<sub>p</sub> − r<sub>f</sub>) / σ<sub>p</sub> — коэффициент Шарпа; (3) «эффективный риск»: min σ<sub>p</sub> при μ<sub>p</sub> = целевой доходности; (4) «эффективная доходность»: max μ<sub>p</sub> при σ<sub>p</sub> ≤ допустимого риска. Решается численно (SLSQP, SciPy).</p>
+          <p><b>Эффективная граница</b> — множество портфелей с минимальным риском для каждого уровня доходности (40 точек). Серое облако — случайные портфели для наглядности. Прямая — линия рынка капитала (CML) из безрисковой ставки через портфель максимального Шарпа.</p>
+          <p><b>Кривая доходности</b> — рост 1 ₽ с ежемесячной ребалансировкой к целевым весам. <b>Среднегодовая доходность (CAGR)</b> = (итог)<sup>12/n</sup> − 1. <b>Максимальная просадка</b> — наибольшее падение от предыдущего максимума. <b>Максимальный период восстановления</b> — самый долгий срок (в месяцах) от пика до возврата к нему.</p>
+          <p><b>Данные:</b> Банк России (М2, ИПЦ, ключевая ставка, курсы USD и CNY, цены золота и серебра), Московская биржа (индексы MCFTR, MESMTR, RGBITR, RUCBITR/RUCBTRNS, MREDC; получены через TradingView и Investing.com). Период: 12.2012 – 08.2026, помесячно.</p>
+        </div>
+      </details>
+    </section>
+    <footer class="muted small">Учебный проект по бизнес-аналитике. Не является инвестиционной рекомендацией.</footer>
+  </main>
+</div>
+
+<div id="loading" class="loading hidden"><div class="spinner"></div><span>Считаю…</span></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
