@@ -1,6 +1,9 @@
 // Страница калькулятора: собирает настройки, отправляет на сервер, рисует графики (Plotly).
 
 const COLORS = ['#7f7f7f', '#1f77b4', '#17becf', '#2ca02c', '#bcbd22', '#ff7f0e', '#9467bd', '#d62728', '#e377c2', '#8c564b'];
+// Общие настройки графиков: без логотипа Plotly, подстраиваются под ширину окна
+const PLOT_CONFIG = { displaylogo: false, responsive: true };
+const FONT = { family: 'Segoe UI, Arial, sans-serif', size: 13, color: '#222' };
 let meta = null;       // список индикаторов с сервера
 let current = null;    // последний рассчитанный портфель
 let saved = [];        // портфели, добавленные в сравнение
@@ -89,7 +92,7 @@ function drawFrontier() {
   const m = current.metrics;
   const traces = [{
     x: current.frontier.map((p) => p[0] * 100), y: current.frontier.map((p) => p[1] * 100),
-    mode: 'lines', name: 'Эффективная граница', line: { color: '#1f77b4', width: 3 },
+    mode: 'lines', name: 'Эффективная граница', line: { color: '#2f6fb5', width: 3 },
   }, {
     x: current.assets.map((a) => a.risk * 100), y: current.assets.map((a) => a.ret * 100),
     text: current.assets.map((a) => a.id), mode: 'markers+text', textposition: 'top center',
@@ -101,8 +104,8 @@ function drawFrontier() {
   Plotly.react('frontier', traces, {
     xaxis: { title: 'Риск (волатильность), % годовых', rangemode: 'tozero' },
     yaxis: { title: 'Ожидаемая доходность, % годовых' },
-    margin: { t: 10 }, legend: { orientation: 'h', y: -0.25 },
-  }, { displaylogo: false });
+    margin: { t: 20, r: 20 }, legend: { orientation: 'h', y: -0.25 }, font: FONT,
+  }, PLOT_CONFIG);
 }
 
 function drawPie() {
@@ -111,7 +114,7 @@ function drawPie() {
     type: 'pie', labels: ids.map(assetName), values: ids.map((id) => current.weights[id]),
     marker: { colors: ids.map(assetColor) }, sort: false,
     textinfo: 'percent', hovertemplate: '%{label}: %{percent}<extra></extra>',
-  }], { margin: { t: 10, b: 10 } }, { displaylogo: false });
+  }], { margin: { t: 20, b: 20 }, font: FONT }, PLOT_CONFIG);
 }
 
 function drawCurve() {
@@ -119,9 +122,9 @@ function drawCurve() {
   const traces = saved.map((r) => line(r, 1.5));
   if (current) traces.push(line({ ...current, name: current.name + ' (текущий)' }, 3));
   Plotly.react('curve', traces, {
-    yaxis: { title: 'Стоимость 1 рубля' }, margin: { t: 10 },
+    yaxis: { title: 'Стоимость 1 рубля' }, margin: { t: 20, r: 20 }, font: FONT,
     legend: { orientation: 'h', y: -0.2 }, hovermode: 'x unified',
-  }, { displaylogo: false });
+  }, PLOT_CONFIG);
 }
 
 function savePortfolio() {
