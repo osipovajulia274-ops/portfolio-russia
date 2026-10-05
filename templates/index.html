@@ -4,63 +4,295 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Калькулятор портфеля</title>
+<!-- Шрифт Manrope загружается из интернета и не задерживает показ страницы. Без интернета используется шрифт системы -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&display=swap" media="print" onload="this.media='all'">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<!-- Библиотека графиков Plotly: своя копия из папки static, а если её нет — из интернета -->
+{% if local_plotly %}
+<script src="{{ url_for('static', filename='plotly.min.js') }}"></script>
+{% else %}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+{% endif %}
 </head>
 <body>
-<h1>Калькулятор инвестиционного портфеля (Россия)</h1>
-<p class="note">Оптимизация по Марковицу. Все доходности реальные: очищены от инфляции (ИПЦ).
-Данные помесячные: Банк России и Московская биржа.</p>
+<!-- Цветной фон страницы и полоска «идёт расчёт» у верхнего края окна -->
+<div class="aurora" aria-hidden="true"></div>
+<div class="loadbar" aria-hidden="true"></div>
 
-<div class="layout">
+<header class="hero">
+  <div class="wrap hero-in">
+    <div class="hero-text">
+      <p class="eyebrow">Бизнес-аналитика · теория портфеля Марковица</p>
+      <h1>Калькулятор инвестиционного портфеля</h1>
+      <p class="lead">Десять российских индикаторов или ваш собственный файл Excel/CSV. Доходности после вычета инфляции, четыре критерия оптимизации.</p>
+      <ul class="facts">
+        <li><b id="factAssets">10</b><span>индикаторов</span></li>
+        <li><b id="factMonths">—</b><span>месяцев данных</span></li>
+        <li><b>4</b><span>критерия</span></li>
+      </ul>
+    </div>
+    <!-- Живая карточка: главный итог текущего расчёта, обновляется при каждом изменении настроек -->
+    <div class="live" id="live">
+      <p class="live-label" id="liveLabel">Считаю портфель…</p>
+      <p class="live-value"><span>1 ₽</span><i>→</i><b id="liveValue">—</b></p>
+      <svg id="liveSpark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <p class="live-mix" id="liveMix"></p>
+    </div>
+  </div>
+</header>
+
+<div class="wrap layout">
+  <!-- ============ Панель настроек: пять шагов, каждый можно свернуть ============ -->
   <form id="form" class="panel">
-    <h2>1. Индикаторы</h2>
-    <div id="assets"></div>
+    <!-- Шаг 1: индикаторы -->
+    <details class="step" open>
+      <summary><span class="num">1</span><span class="name">Данные</span><span class="sum" id="sumAssets"></span></summary>
+      <div class="body">
+        <div class="seg wide" id="source">
+          <button type="button" data-source="builtin" class="on">Встроенные</button>
+          <button type="button" data-source="file">Свой файл</button>
+        </div>
+        <!-- Загрузка своего файла: видна, когда выбран «Свой файл» -->
+        <div id="uploadBox" hidden>
+          <label class="drop" id="drop">
+            <input type="file" id="files" multiple accept=".csv,.txt,.tsv,.xlsx,.xlsm,.xls,.htm,.html">
+            <b>Перетащите файл сюда</b>
+            <span>или нажмите, чтобы выбрать</span>
+            <small>Excel или CSV любого вида. Можно несколько файлов сразу.</small>
+          </label>
+          <p id="uploadError" class="message" hidden></p>
+          <div id="uploadReport" class="report" hidden></div>
+          <p class="hint">Нужна таблица с датами и хотя бы двумя столбцами цен или доходностей. <a href="/api/template">Скачать пример файла</a></p>
+        </div>
+        <p class="hint">Из чего собирать портфель. Нужно не меньше двух.
+          <span class="links"><button type="button" id="allAssets">все</button><button type="button" id="defaultAssets">сбросить</button></span></p>
+        <div id="assets" class="assets"></div>
+      </div>
+    </details>
 
-    <h2>2. Период</h2>
-    <label>с <select id="start"></select></label>
-    <label>по <select id="end"></select></label>
-    <p class="note">Расчёт идёт по общему периоду, где есть данные по всем выбранным индикаторам.</p>
+    <!-- Шаг 2: период -->
+    <details class="step">
+      <summary><span class="num">2</span><span class="name">Период</span><span class="sum" id="sumPeriod"></span></summary>
+      <div class="body">
+        <div class="chips" id="presets">
+          <button type="button" data-years="0">Весь</button>
+          <button type="button" data-years="5">5 лет</button>
+          <button type="button" data-years="3">3 года</button>
+        </div>
+        <div class="row">
+          <label>с <select id="start"></select></label>
+          <label>по <select id="end"></select></label>
+        </div>
+        <p class="hint">Расчёт идёт по месяцам, где есть данные по всем выбранным индикаторам.</p>
+      </div>
+    </details>
 
-    <h2>3. Критерий</h2>
-    <label><input type="radio" name="criterion" value="min_vol" checked> Минимальная волатильность</label>
-    <label><input type="radio" name="criterion" value="max_sharpe"> Максимальный коэффициент Шарпа</label>
-    <label><input type="radio" name="criterion" value="target_return"> Эффективный риск (задаю доходность)</label>
-    <label><input type="radio" name="criterion" value="target_risk"> Эффективная доходность (задаю риск)</label>
+    <!-- Шаг 3: критерий -->
+    <details class="step" open>
+      <summary><span class="num">3</span><span class="name">Критерий</span><span class="sum" id="sumCriterion"></span></summary>
+      <div class="body">
+        <label class="option"><input type="radio" name="criterion" value="min_vol" checked>
+          <svg viewBox="0 0 64 44" aria-hidden="true"><path d="M10 38C10 20 28 9 58 6"/><path class="guide" d="M10 4V42"/><circle cx="10" cy="38" r="4.5"/></svg>
+          <span><b>Минимальная волатильность</b><small>Самый спокойный портфель</small></span></label>
+        <label class="option"><input type="radio" name="criterion" value="max_sharpe">
+          <svg viewBox="0 0 64 44" aria-hidden="true"><path d="M10 38C10 20 28 9 58 6"/><path class="guide" d="M2 34L52 2"/><circle cx="24" cy="20" r="4.5"/></svg>
+          <span><b>Максимальный коэффициент Шарпа</b><small>Больше всего доходности на единицу риска</small></span></label>
+        <label class="option"><input type="radio" name="criterion" value="target_return">
+          <svg viewBox="0 0 64 44" aria-hidden="true"><path d="M10 38C10 20 28 9 58 6"/><path class="guide" d="M2 14H62"/><circle cx="34" cy="14" r="4.5"/></svg>
+          <span><b>Эффективный риск</b><small>Задаю доходность — получаю минимальный риск</small></span></label>
+        <label class="option"><input type="radio" name="criterion" value="target_risk">
+          <svg viewBox="0 0 64 44" aria-hidden="true"><path d="M10 38C10 20 28 9 58 6"/><path class="guide" d="M40 2V42"/><circle cx="40" cy="11" r="4.5"/></svg>
+          <span><b>Эффективная доходность</b><small>Задаю риск — получаю максимум доходности</small></span></label>
+        <div id="targetRow" class="slider" hidden>
+          <label for="target" id="targetLabel"></label>
+          <div class="slider-row">
+            <input type="range" id="targetRange" step="0.1" data-for="target">
+            <input type="number" id="target" step="any" value="8"><span>%</span>
+          </div>
+        </div>
+      </div>
+    </details>
 
-    <label id="targetRow" hidden><span id="targetLabel"></span>
-      <input type="number" id="target" step="any" value="8"></label>
-    <label>Безрисковая ставка, % годовых
-      <input type="number" id="rf" step="any" value="5"></label>
+    <!-- Шаг 4: безрисковая ставка -->
+    <details class="step">
+      <summary><span class="num">4</span><span class="name">Безрисковая ставка</span><span class="sum" id="sumRf"></span></summary>
+      <div class="body">
+        <div class="slider">
+          <div class="slider-row">
+            <input type="range" id="rfRange" min="0" max="20" step="0.5" value="5" data-for="rf">
+            <input type="number" id="rf" step="any" value="5"><span>%</span>
+          </div>
+        </div>
+        <p class="hint">Нужна для коэффициента Шарпа. В задании — 0,05, то есть 5% годовых.</p>
+      </div>
+    </details>
 
-    <button type="submit">Рассчитать</button>
+    <!-- Шаг 5: дополнительные допущения -->
+    <details class="step">
+      <summary><span class="num">5</span><span class="name">Дополнительно</span><span class="sum" id="sumExtra"></span></summary>
+      <div class="body">
+        <p class="hint">Необязательные допущения. Если ничего не отмечено, расчёт идёт только по ценам, без издержек.</p>
+        <label class="check"><input type="checkbox" id="useIncome">
+          <span>Учитывать доход помимо роста цены</span></label>
+        <label class="field sub"><span>Аренда недвижимости, % в год</span>
+          <input type="number" id="rent" step="any" value="5.5"></label>
+        <label class="field sub"><span>Валютный вклад (доллар, юань), % в год</span>
+          <input type="number" id="deposit" step="any" value="1.2"></label>
+        <label class="check"><input type="checkbox" id="useCosts">
+          <span>Учитывать комиссии и налог</span></label>
+        <label class="field sub"><span>Комиссия с каждой сделки, %</span>
+          <input type="number" id="fee" step="any" value="0.1"></label>
+        <label class="field sub"><span>Налог на доход в конце, %</span>
+          <input type="number" id="tax" step="any" value="13"></label>
+      </div>
+    </details>
+
+    <div class="foot">
+      <button type="submit" id="run">Рассчитать портфель</button>
+      <p class="hint">Результат обновляется сам при любом изменении настроек.</p>
+    </div>
   </form>
 
-  <div class="results">
+  <main id="results" class="results">
     <p id="message" class="message" hidden></p>
 
-    <h2>Показатели портфеля <span id="period" class="note"></span></h2>
-    <table id="metrics"></table>
+    <!-- ============ Ход расчёта: шесть этапов, по каждому можно открыть подробности ============ -->
+    <section class="card">
+      <div class="card-head">
+        <div><p class="eyebrow">Ход расчёта</p><h2>Что произошло с данными</h2></div>
+        <span id="timing" class="hint"></span>
+      </div>
+      <ol id="stages" class="stages"></ol>
+      <p id="stageHint" class="hint">Нажмите на этап, чтобы увидеть, что в него вошло, что вышло и что по дороге отброшено.</p>
+      <div id="stageDetail" class="detail" hidden></div>
+    </section>
 
-    <h2>Эффективная граница</h2>
-    <div id="frontier" class="chart"></div>
+    <!-- ============ Главный результат ============ -->
+    <section class="card">
+      <div class="card-head">
+        <div><p class="eyebrow" id="period"></p><h2 id="resultTitle">Портфель</h2></div>
+        <button type="button" id="export">Скачать в Excel</button>
+      </div>
+      <div id="headline" class="headline"></div>
+      <div id="metrics" class="tiles"></div>
+    </section>
 
-    <h2>Веса портфеля</h2>
-    <div id="pie" class="chart"></div>
+    <nav class="tabs" id="tabs">
+      <button type="button" data-tab="portfolio" class="on">Портфель</button>
+      <button type="button" data-tab="sources">Откуда результат</button>
+      <button type="button" data-tab="dynamics">Динамика и сравнение</button>
+      <button type="button" data-tab="stability">Устойчивость</button>
+      <button type="button" data-tab="future">Проверка на «будущем»</button>
+    </nav>
 
-    <h2>Кривая доходности</h2>
-    <p class="note">Во что превратился 1 рубль, вложенный в начале периода (после вычета инфляции).</p>
-    <div id="curve" class="chart"></div>
+    <!-- ============ Вкладка «Портфель» ============ -->
+    <div class="tab" data-tab="portfolio">
+      <div class="two">
+        <section class="card">
+          <p class="eyebrow">Риск и доходность</p>
+          <h2>Эффективная граница</h2>
+          <p class="hint">Линия — лучшие портфели: больше доходности при том же риске получить нельзя. Звезда — выбранный портфель. <b>Щёлкните по линии</b>, чтобы построить портфель в этой точке.</p>
+          <div id="frontier" class="chart"></div>
+        </section>
+        <section class="card">
+          <p class="eyebrow">Состав</p>
+          <h2>Веса портфеля</h2>
+          <p class="hint">Какую долю денег куда вложить. Наведите на сектор или на строку таблицы.</p>
+          <div id="pie" class="chart small"></div>
+          <table id="weights"></table>
+        </section>
+      </div>
+    </div>
 
-    <h2>Сравнение портфелей</h2>
-    <p>
-      <button type="button" id="save">Добавить текущий портфель в сравнение</button>
-      <button type="button" id="clear">Очистить</button>
-    </p>
-    <p class="note">Добавленные портфели показываются на графике кривой доходности и в таблице ниже.</p>
-    <table id="compare"></table>
-  </div>
+    <!-- ============ Вкладка «Откуда результат» ============ -->
+    <div class="tab" data-tab="sources" hidden>
+      <section class="card">
+        <p class="eyebrow">Разложение</p>
+        <h2>Из чего сложились доходность и риск</h2>
+        <p class="hint">Каждая строка — вклад одного индикатора. В сумме вклады дают доходность и риск всего портфеля.</p>
+        <div class="scroll"><table id="contributions"></table></div>
+        <p class="note" id="contributionsNote"></p>
+      </section>
+      <div class="two even">
+        <section class="card">
+          <p class="eyebrow">Путь рубля</p>
+          <h2>Что прибавилось и что пропало</h2>
+          <div id="waterfall" class="chart"></div>
+          <p class="note" id="waterfallNote"></p>
+        </section>
+        <section class="card">
+          <p class="eyebrow">Диверсификация</p>
+          <h2>Как индикаторы связаны между собой</h2>
+          <div id="correlation" class="chart"></div>
+          <p class="note" id="correlationNote"></p>
+        </section>
+      </div>
+    </div>
+
+    <!-- ============ Вкладка «Динамика и сравнение» ============ -->
+    <div class="tab" data-tab="dynamics" hidden>
+      <section class="card">
+        <div class="card-head">
+          <div><p class="eyebrow">Во времени</p><h2>Кривая доходности</h2></div>
+          <div class="seg" id="curveMode">
+            <button type="button" data-mode="value" class="on">Рост 1 ₽</button>
+            <button type="button" data-mode="drawdown">Просадка</button>
+          </div>
+        </div>
+        <p class="hint" id="curveHint"></p>
+        <label class="check small" id="benchmarkRow"><input type="checkbox" id="showBenchmark" checked>
+          <span>Показать ориентир: рост денежной массы М2</span></label>
+        <div id="curve" class="chart tall"></div>
+        <p class="note" id="benchmarkNote" hidden></p>
+      </section>
+      <section class="card">
+        <div class="card-head">
+          <div><p class="eyebrow">Несколько портфелей</p><h2>Сравнение</h2></div>
+          <div class="row">
+            <button type="button" id="compareAll" class="primary">Сравнить все четыре критерия</button>
+            <button type="button" id="save">+ Добавить текущий</button>
+            <button type="button" id="clear">Очистить</button>
+          </div>
+        </div>
+        <p class="hint">Одна кнопка строит четыре портфеля под четыре критерия. Или собирайте сравнение вручную: добавьте портфель, измените настройки — и линии окажутся на одном графике кривой доходности, а показатели в таблице.</p>
+        <div class="scroll"><table id="compare"></table></div>
+      </section>
+    </div>
+
+    <!-- ============ Вкладка «Устойчивость» ============ -->
+    <div class="tab" data-tab="stability" hidden>
+      <section class="card">
+        <div class="card-head">
+          <div><p class="eyebrow">Проверка</p><h2>Устойчивость к периоду</h2></div>
+          <button type="button" id="checkStability">Проверить</button>
+        </div>
+        <p class="hint">Тот же критерий считается на нескольких отрезках одинаковой длины (обычно 5 лет), сдвинутых на полгода. Если столбики похожи, результат устойчив. Если доли сильно меняются, ответ зависит от того, какой период взять.</p>
+        <div id="stability" class="chart tall" hidden></div>
+      </section>
+    </div>
+
+    <!-- ============ Вкладка «Проверка на будущем» ============ -->
+    <div class="tab" data-tab="future" hidden>
+      <section class="card">
+        <div class="card-head">
+          <div><p class="eyebrow">Проверка</p><h2>Что было бы, если подобрать доли заранее</h2></div>
+          <label class="row">Доли подбираются по данным до <select id="split"></select></label>
+        </div>
+        <p class="hint">Обычный расчёт подбирает доли и оценивает их на одних и тех же месяцах, поэтому результат выглядит лучше, чем был бы в жизни. Здесь период разрезан на две части: доли подобраны только по ранней, а результат посчитан на поздней, которую программа «не видела».</p>
+        <div id="futureFlow"></div>
+        <div class="scroll"><table id="futureTable"></table></div>
+        <div id="futureChart" class="chart"></div>
+        <p class="note" id="futureNote"></p>
+      </section>
+    </div>
+  </main>
 </div>
+
+<!-- Карточка «что изменилось» после пересчёта и подсказка к термину -->
+<aside id="toast" class="toast" hidden></aside>
+<div id="tip" class="tip" role="tooltip" hidden></div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
